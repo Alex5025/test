@@ -1,0 +1,22 @@
+{
+  "name": "mongodb-template-mcp-server",
+  "version": "1.0.0",
+  "description": "MongoDB 版本的模板標籤匹配 MCP 服務器",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "init-db": "node src/init-database.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.5.0",
+    "mongodb": "^6.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  },
+  "keywords": ["mcp", "template", "matching", "mongodb", "tags"],
+  "author": "Alex",
+  "license": "MIT"
+}
