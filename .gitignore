@@ -156,6 +156,14 @@ $RECYCLE.BIN/
 # MCP specific
 mcp-config.json.backup
 *.mcp.backup
+mcp-config.local.json
+mcp-config.json
+
+# Sensitive configuration files
+*.token
+*.key
+*.secret
+config.local.*
 
 # Python
 __pycache__/
