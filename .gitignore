@@ -157,7 +157,8 @@ $RECYCLE.BIN/
 mcp-config.json.backup
 *.mcp.backup
 mcp-config.local.json
-mcp-config.json
+**/mcp.json
+**/mcp-config.json
 
 # Sensitive configuration files
 *.token
