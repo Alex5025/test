@@ -1,0 +1,32 @@
+{
+  "name": "template-recommendation-mcp",
+  "version": "1.0.0",
+  "description": "MCP Server for AI-powered template recommendation",
+  "type": "module",
+  "bin": {
+    "template-recommendation-mcp": "./build/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "prepare": "npm run build",
+    "start": "node build/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "template",
+    "ai",
+    "recommendation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "mongodb": "^6.3.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "typescript": "^5.7.2"
+  }
+}
