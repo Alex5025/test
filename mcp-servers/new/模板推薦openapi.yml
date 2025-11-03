@@ -1,0 +1,145 @@
+openapi: 3.0.3
+info:
+  title: 模板查詢 API
+  version: 1.0.0
+  description: 依據自然語言查詢推薦模板的 API
+servers:
+  - url: http://localhost:3000
+paths:
+  /api-v1/common/template/query:
+    post:
+      summary: 查詢案件資訊
+      description: 依據自然語言查詢推薦模板
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                MWHEADER:
+                  $ref: "#/components/schemas/MWHEADER"
+                TRANRQ:
+                  $ref: "#/components/schemas/TRANRQ"
+              required:
+                - MWHEADER
+                - TRANRQ
+            example:
+              MWHEADER:
+                MSGID: "程式名稱未定"
+                SOURCECHANNEL: "AP_ID未定"
+                TXNSEQ: ""
+                RETURNCODE: ""
+                RETURNDESC: ""
+                O360SEQ: ""
+              TRANRQ:
+                NL: "幫我推薦一個信用卡進度追蹤頁面模版"
+      responses:
+        "200":
+          description: 成功回應
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  MWHEADER:
+                    $ref: "#/components/schemas/MWHEADER"
+                  TRANRS:
+                    $ref: "#/components/schemas/TRANRS"
+              example:
+                MWHEADER:
+                  MSGID: "程式名稱未定"
+                  SOURCECHANNEL: "AP_ID未定"
+                  TXNSEQ: ""
+                  RETURNCODE: "0000"
+                  RETURNDESC: "交易成功"
+                  O360SEQ: ""
+                TRANRS:
+                  DebugMod: true
+                  TemplateList:
+                    - TemplateID: "XXXXXXXXXXXXXXX..."
+                      Reliability: 0.85
+                      Tags:
+                        - 功能: ["填寫", "選項", "送出"]
+                        - 情境: ["資料新增", "資料修改/變更", "申請"]
+                        - 業務: ["銀行", "金融", "經辦"]
+                        - 佈局: ["表單"]
+                    - TemplateID: "XXXXXXXXXXXXXXX..."
+                      Reliability: 0.85
+                      Tags:
+                        - 功能: ["填寫", "豋錄", "送出"]
+                        - 情境: ["資料新增", "資料修改/變更", "申請"]
+                        - 業務: ["銀行", "金融", "交易"]
+                        - 佈局: ["單頁"]
+components:
+  schemas:
+    MWHEADER:
+      type: object
+      properties:
+        MSGID:
+          type: string
+          maxLength: 20
+          description: 程式名稱
+        SOURCECHANNEL:
+          type: string
+          maxLength: 13
+          description: 來源端系統AP ID
+        TXNSEQ:
+          type: string
+          maxLength: 20
+          description: 交易序號
+        RETURNCODE:
+          type: string
+          maxLength: 4
+          description: |
+            自訂業務錯誤代碼（非 HTTP 狀態碼）。
+            0000: 交易成功
+            E400: 必填欄位不完整
+            E500: Internal Server Error
+            E504: AI Gateway Time Out
+            9999: 其他系統異常
+        RETURNDESC:
+          type: string
+          maxLength: 128
+          description: 處理結果訊息
+        O360SEQ:
+          type: string
+          maxLength: 20
+          description: 保留欄位
+    TRANRQ:
+      type: object
+      properties:
+        NL:
+          type: string
+          maxLength: 200
+          description: 使用者輸入的自然語言
+      required:
+        - NL
+    TRANRS:
+      type: object
+      properties:
+        DebugMod:
+          type: boolean
+          description: 是否顯示詳細資訊
+        TemplateList:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            properties:
+              TemplateID:
+                type: string
+                maxLength: 32
+                description: 模板ID
+              Reliability:
+                type: number
+                format: float
+                description: AI 預估模板可信度
+              Tags:
+                type: object
+                description: 各分類對應標籤陣列（MAP 格式，key 為分類名稱，value 為字串陣列）
+                additionalProperties:
+                  type: array
+                  items:
+                    type: string
+                  description: 標籤字串陣列
