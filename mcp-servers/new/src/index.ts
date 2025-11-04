@@ -92,11 +92,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         debugMode?: boolean 
       };
 
-      // 步驟 2: 從資料庫取得所有標籤
+      // 步驟 2: 從資料庫取得所有標籤和標籤分組
       const allTags = await dbService.getAllTags();
+      const tagsByGroup = await dbService.getTagsByGroup();
 
-      // 步驟 3: 使用 LLM 選擇相關標籤
-      const selectedTags = await llmService.selectRelevantTags(naturalLanguage, allTags);
+      // 步驟 3: 使用 LLM 選擇相關標籤（傳入資料庫的標籤分組）
+      const selectedTags = await llmService.selectRelevantTags(naturalLanguage, allTags, tagsByGroup);
 
       // 步驟 4: 取得所有模板並計算匹配度
       const templates = await dbService.getAllTemplates();

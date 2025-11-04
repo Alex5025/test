@@ -65,6 +65,22 @@ export class DatabaseService {
     return tags.map(tag => tag.tag_name);
   }
 
+  async getTagsByGroup(): Promise<Map<string, string[]>> {
+    const collection = this.getTagsCollection();
+    const tags = await collection.find({}).toArray();
+    
+    const tagsByGroup = new Map<string, string[]>();
+    
+    for (const tag of tags) {
+      if (!tagsByGroup.has(tag.tag_group)) {
+        tagsByGroup.set(tag.tag_group, []);
+      }
+      tagsByGroup.get(tag.tag_group)!.push(tag.tag_name);
+    }
+    
+    return tagsByGroup;
+  }
+
   async getAllTemplates(): Promise<Template[]> {
     const collection = this.getTemplatesCollection();
     return await collection.find({}).toArray();
