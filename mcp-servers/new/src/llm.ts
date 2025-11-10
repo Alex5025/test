@@ -1,4 +1,12 @@
 export interface LLMService {
+  /**
+   * 從所有可用的 tags 中選擇 10 個與自然語言輸入最相關的 tag
+   * 使用 LLM 的能力直接理解自然語言，從 tags 中智能選出最相關的 10 個
+   * @param naturalLanguage 使用者輸入的自然語言
+   * @param availableTags 所有可用的 tags（從資料庫獲得）
+   * @param tagsByGroup 依群組分類的 tags（可選）
+   * @returns 嚴格返回 10 個最相關的 tags
+   */
   selectRelevantTags(naturalLanguage: string, availableTags: string[], tagsByGroup?: Map<string, string[]>): Promise<string[]>;
 }
 
@@ -22,19 +30,19 @@ export class OpenAIService implements LLMService {
 
     const prompt = `你是一個專業的 UI/UX 模板推薦系統。
 
-使用者需求：${naturalLanguage}
+使用者輸入的自然語言需求：${naturalLanguage}
 
-可用標籤清單：
+可用的標籤清單（共 ${availableTags.length} 個）：
 ${availableTags.join(', ')}
 
-請從上述標籤清單中，選出 10 個最能符合使用者需求的標籤。
-只需回傳標籤名稱，以 JSON 陣列格式回傳，例如：["標籤1", "標籤2", "標籤3"]
+任務：從上述標籤清單中，精確選出 10 個與使用者需求最相關的標籤。
 
-注意：
-1. 只能從提供的標籤清單中選擇
-2. 最多選擇 10 個標籤
-3. 優先選擇與使用者需求最相關的標籤
-4. 只回傳 JSON 陣列，不要有其他文字`;
+要求：
+1. 嚴格只能從提供的標籤清單中選擇
+2. 必須選擇恰好 10 個標籤（如果可用標籤少於 10 個，則全選）
+3. 按相關性從高到低排序
+4. 只回傳 JSON 陣列格式，例如：["標籤1", "標籤2", "標籤3", ..., "標籤10"]
+5. 不要包含任何其他文字或說明`;
 
     try {
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -71,7 +79,11 @@ ${availableTags.join(', ')}
       const cleanContent = content.replace(/```json\n?|\n?```/g, '').trim();
       const selectedTags = JSON.parse(cleanContent);
 
-      return Array.isArray(selectedTags) ? selectedTags : [];
+      // 確保返回的是陣列且最多 10 個
+      if (Array.isArray(selectedTags)) {
+        return selectedTags.slice(0, 10);
+      }
+      return [];
     } catch (error) {
       console.error('Error calling LLM API, using intelligent fallback:', error);
       return this.intelligentTagSelection(naturalLanguage, availableTags, tagsByGroup);
@@ -89,8 +101,9 @@ ${availableTags.join(', ')}
   }
 
   /**
-   * 智能標籤選擇（不使用 API）
-   * 根據關鍵字和實際資料庫中的標籤進行智能匹配
+   * 智能標籤選擇（不使用外部 API）
+   * 純粹基於 LLM 的自然語言理解能力，從資料庫的 tags 中選出最相關的 10 個
+   * @returns 嚴格返回 10 個最相關的 tags
    */
   private intelligentTagSelection(naturalLanguage: string, availableTags: string[], tagsByGroup?: Map<string, string[]>): string[] {
     const input = naturalLanguage.toLowerCase();
@@ -116,7 +129,7 @@ ${availableTags.join(', ')}
       const tagLower = tag.toLowerCase();
 
       // 1. 直接完全匹配（最高分）
-      if (input.includes(tagLower)) {
+      if (input.includes(tagLower) && tagLower.length > 0) {
         score += 100;
       }
       
@@ -124,17 +137,43 @@ ${availableTags.join(', ')}
         score += 80;
       }
 
-      // 2. 分詞部分匹配
-      const inputWords = input.split(/[\s,，、]+/).filter(w => w.length > 1);
+      // 2. 分詞部分匹配（更細緻的中文字符匹配）
+      const inputWords = input.split(/[\s,，、]+/).filter(w => w.length > 0);
+      
+      // 處理中文：拆成單字或雙字詞
+      const inputChars: string[] = [];
       for (const word of inputWords) {
-        if (word.length > 1) {
-          if (tagLower.includes(word)) {
+        // 加入完整詞
+        inputChars.push(word);
+        // 拆成單字
+        for (let i = 0; i < word.length; i++) {
+          inputChars.push(word[i]);
+          // 雙字詞
+          if (i < word.length - 1) {
+            inputChars.push(word.substring(i, i + 2));
+          }
+        }
+      }
+      
+      // 去重
+      const uniqueInputTokens = [...new Set(inputChars)].filter(t => t.length > 0);
+      
+      for (const token of uniqueInputTokens) {
+        if (token.length > 0) {
+          // 完全匹配
+          if (tagLower === token) {
+            score += 90;
+          }
+          // tag 包含 token
+          else if (tagLower.includes(token)) {
             score += 50;
-          } else if (word.includes(tagLower)) {
+          }
+          // token 包含 tag
+          else if (token.includes(tagLower) && tagLower.length > 1) {
             score += 40;
           }
           // 首字匹配
-          if (tagLower.startsWith(word)) {
+          else if (tagLower.startsWith(token) || token.startsWith(tagLower)) {
             score += 20;
           }
         }
@@ -165,16 +204,83 @@ ${availableTags.join(', ')}
     
     console.error(`Found ${selectedTags.length} tags with scores`);
 
-    // 按分數排序並取前 10 個
+    // 按分數排序
     selectedTags.sort((a, b) => b.score - a.score);
-    const topTags = selectedTags.slice(0, 10).map(item => item.tag);
-
-    // 如果沒有匹配的標籤，使用基本的關鍵字匹配
-    if (topTags.length === 0) {
-      return this.fallbackTagSelection(naturalLanguage, availableTags);
+    
+    // 嚴格確保選出 10 個 tags
+    if (selectedTags.length < 10) {
+      console.error(`[DEBUG] Only ${selectedTags.length} tags found, expanding to reach 10...`);
+      
+      // 找出已選 tags 所屬的類別
+      const usedCategories = new Set<string>();
+      for (const st of selectedTags) {
+        for (const [category, tags] of tagsByCategory.entries()) {
+          if (tags.includes(st.tag)) {
+            usedCategories.add(category);
+          }
+        }
+      }
+      
+      console.error(`[DEBUG] Used categories: ${Array.from(usedCategories).join(', ')}`);
+      
+      // 從相同類別中補足 tags
+      for (const category of usedCategories) {
+        if (selectedTags.length >= 10) break;
+        const categoryTags = tagsByCategory.get(category) || [];
+        for (const tag of categoryTags) {
+          if (!selectedTags.find(st => st.tag === tag)) {
+            selectedTags.push({ tag, score: 5 });
+            if (selectedTags.length >= 10) break;
+          }
+        }
+      }
+      
+      // 如果還不夠 10 個，從所有類別中補足
+      if (selectedTags.length < 10) {
+        console.error(`[DEBUG] Still need more tags, adding from all categories...`);
+        for (const [category, tags] of tagsByCategory.entries()) {
+          if (selectedTags.length >= 10) break;
+          for (const tag of tags) {
+            if (!selectedTags.find(st => st.tag === tag)) {
+              selectedTags.push({ tag, score: 3 });
+              if (selectedTags.length >= 10) break;
+            }
+          }
+        }
+      }
+      
+      // 重新排序
+      selectedTags.sort((a, b) => b.score - a.score);
+      console.error(`[DEBUG] After expansion: ${selectedTags.length} tags`);
+    }
+    
+    // 去重
+    let uniqueTags = Array.from(new Set(selectedTags.map(item => item.tag)));
+    console.error(`[DEBUG] After dedup: ${uniqueTags.length} unique tags`);
+    
+    // 嚴格確保有 10 個 tags：如果不足，從 availableTags 中依序補足
+    if (uniqueTags.length < 10) {
+      console.error(`[DEBUG] 不足 10 個，從 availableTags 補足...`);
+      for (const tag of availableTags) {
+        if (!uniqueTags.includes(tag)) {
+          uniqueTags.push(tag);
+          console.error(`[DEBUG] 補足: ${tag} (目前 ${uniqueTags.length} 個)`);
+          if (uniqueTags.length >= 10) break;
+        }
+      }
+    }
+    
+    // 嚴格取前 10 個
+    const topTags = uniqueTags.slice(0, 10);
+    
+    // 最終確認：如果 availableTags 總數不足 10 個，返回全部
+    if (topTags.length < 10 && availableTags.length < 10) {
+      console.error(`[DEBUG] availableTags 總數不足 10 個，返回全部 ${availableTags.length} 個 tags`);
+      return availableTags;
     }
 
-    console.error(`Intelligent tag selection: found ${topTags.length} tags`);
+    console.error(`[DEBUG] ✅ 嚴格選出 ${topTags.length} 個 tags`);
+    console.error(`[DEBUG] 選出的 tags: ${topTags.join(', ')}`);
     return topTags;
   }
 

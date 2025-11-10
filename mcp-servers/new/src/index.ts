@@ -92,18 +92,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         debugMode?: boolean 
       };
 
-      // 步驟 2: 從資料庫取得所有標籤和標籤分組
+      // 步驟 B: 到 DB 中拿取所有 tags 資料
+      console.error(`[MCP] 步驟 B: 到 DB 中拿取所有 tags 資料...`);
       const allTags = await dbService.getAllTags();
       const tagsByGroup = await dbService.getTagsByGroup();
+      console.error(`[MCP] 獲得 ${allTags.length} 個 tags`);
 
-      // 步驟 3: 使用 LLM 選擇相關標籤（傳入資料庫的標籤分組）
+      // 步驟 C: 將 tags 和自然語言送入 LLM 模型，並請 LLM 從 tags 中選出 10 個與自然語言最接近的 tags
+      console.error(`[MCP] 步驟 C: 將 tags 和自然語言送入 LLM 模型，選出 10 個最接近的 tags`);
+      console.error(`[MCP] 輸入: "${naturalLanguage}"`);
       const selectedTags = await llmService.selectRelevantTags(naturalLanguage, allTags, tagsByGroup);
+      console.error(`[MCP] 選出 ${selectedTags.length} 個相關 tags: ${selectedTags.join(', ')}`);
 
-      // 步驟 4: 取得所有模板並計算匹配度
+      // 步驟 D: 到 DB 中拿取所有 template 資料
+      console.error(`[MCP] 步驟 D: 到 DB 中拿取所有 template 資料...`);
       const templates = await dbService.getAllTemplates();
-      const matches = matchingService.calculateMatches(selectedTags, templates);
+      console.error(`[MCP] 獲得 ${templates.length} 個 templates`);
 
-      // 步驟 5: 格式化回傳結果
+      // 步驟 E: 利用 AI 提供的 10 個 tags 找出最相關的 template_id
+      console.error(`[MCP] 步驟 E: 利用 AI 提供的 ${selectedTags.length} 個 tags 找出最相關的 template_id...`);
+      const matches = matchingService.calculateMatches(selectedTags, templates);
+      console.error(`[MCP] 找到 ${matches.length} 個最相關的 templates: ${matches.map(m => m.templateId).join(', ')}`);
+
+      // 步驟 F: 回傳給使用者
       const response = {
         MWHEADER: {
           MSGID: 'template-recommendation-mcp',
@@ -115,6 +126,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         },
         TRANRS: {
           DebugMod: debugMode,
+          tags: selectedTags,
           TemplateList: matches.map(match => ({
             TemplateID: match.templateId,
             Reliability: match.reliability,
@@ -130,6 +142,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       if (debugMode) {
         (response.TRANRS as any).Debug = {
+          userInput: naturalLanguage,
           aiSelectedTags: selectedTags,
           totalTagsAvailable: allTags.length,
           totalTemplatesChecked: templates.length

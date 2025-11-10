@@ -81,6 +81,8 @@ export class DatabaseService {
     return tagsByGroup;
   }
 
+  
+
   async getAllTemplates(): Promise<Template[]> {
     const collection = this.getTemplatesCollection();
     return await collection.find({}).toArray();
