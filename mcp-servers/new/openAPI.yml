@@ -1,0 +1,520 @@
+openapi: 3.0.3
+info:
+  title: 模板管理 API
+  version: 1.0.0
+  description: 提供模板查詢、上傳、新增的 API
+servers:
+  - url: http://localhost:3000
+    description: HTTP API 伺服器
+  - url: stdio://template-recommendation-mcp
+    description: MCP 伺服器 (透過 stdio 通訊)
+paths:
+  /mcp/tools/get_all_tags:
+    post:
+      summary: MCP 工具 - 獲取所有標籤
+      description: MCP 工具用於獲取資料庫中所有可用的標籤清單
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+      responses:
+        "200":
+          description: 成功回應
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                          enum: ["text"]
+                        text:
+                          type: string
+                          description: JSON 格式的標籤清單
+              example:
+                content:
+                  - type: "text"
+                    text: "{\"tags\":[\"填寫\",\"選項\",\"送出\",\"表單\",\"銀行\"],\"total\":150}"
+  /mcp/tools/get_template_by_id:
+    post:
+      summary: MCP 工具 - 根據 ID 獲取模板
+      description: MCP 工具用於根據模板 ID 獲取模板的詳細資訊
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                templateId:
+                  type: string
+                  description: 模板 ID
+              required:
+                - templateId
+            example:
+              templateId: "template123"
+      responses:
+        "200":
+          description: 成功回應
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                          enum: ["text"]
+                        text:
+                          type: string
+                          description: JSON 格式的模板資料
+              example:
+                content:
+                  - type: "text"
+                    text: "{\"template_id\":\"template123\",\"json_data_function\":[\"填寫\",\"送出\"],\"json_data_layout\":[\"表單\"]}"
+        "404":
+          description: 模板不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                          enum: ["text"]
+                        text:
+                          type: string
+              example:
+                content:
+                  - type: "text"
+                    text: "{\"error\":\"找不到指定的模板\"}"
+  /api-v1/common/template/query:
+    post:
+      summary: 查詢案件資訊
+      description: 依據自然語言查詢推薦模板
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                MWHEADER:
+                  $ref: "#/components/schemas/MWHEADER"
+                TRANRQ:
+                  $ref: "#/components/schemas/TRANRQ"
+              required:
+                - MWHEADER
+                - TRANRQ
+            example:
+              MWHEADER:
+                MSGID: "程式名稱未定"
+                SOURCECHANNEL: "AP_ID未定"
+                TXNSEQ: ""
+                RETURNCODE: ""
+                RETURNDESC: ""
+                O360SEQ: ""
+              TRANRQ:
+                NL: "幫我推薦一個信用卡進度追蹤頁面模版"
+      responses:
+        "200":
+          description: 成功回應
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  MWHEADER:
+                    $ref: "#/components/schemas/MWHEADER"
+                  TRANRS:
+                    $ref: "#/components/schemas/TRANRS"
+              example:
+                MWHEADER:
+                  MSGID: "程式名稱未定"
+                  SOURCECHANNEL: "AP_ID未定"
+                  TXNSEQ: ""
+                  RETURNCODE: "0000"
+                  RETURNDESC: "交易成功"
+                  O360SEQ: ""
+                TRANRS:
+                  DebugMod: true
+                  tags: ["填寫", "選項", "送出", "資料新增", "銀行", "金融", "表單"]
+                  TemplateList:
+                    - TemplateID: "XXXXXXXXXXXXXXX..."
+                      Reliability: 0.85
+                      Tags:
+                        - 功能: ["填寫", "選項", "送出"]
+                        - 情境: ["資料新增", "資料修改/變更", "申請"]
+                        - 業務: ["銀行", "金融", "經辦"]
+                        - 佈局: ["表單"]
+                    - TemplateID: "XXXXXXXXXXXXXXX..."
+                      Reliability: 0.85
+                      Tags:
+                        - 功能: ["填寫", "豋錄", "送出"]
+                        - 情境: ["資料新增", "資料修改/變更", "申請"]
+                        - 業務: ["銀行", "金融", "交易"]
+                        - 佈局: ["單頁"]
+                  Debug:
+                    userInput: "幫我推薦一個信用卡進度追蹤頁面模版"
+                    aiSelectedTags: ["填寫", "選項", "送出", "資料新增", "銀行", "金融", "表單"]
+                    totalTagsAvailable: 150
+                    totalTemplatesChecked: 25
+  /api-v1/common/template/perinsert:
+    post:
+      summary: 上傳模板並獲得AI推薦Tags
+      description: 上傳模板圖片並獲得AI推薦的Tags
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                MSGID:
+                  type: string
+                  maxLength: 20
+                  description: 程式名稱
+                SOURCECHANNEL:
+                  type: string
+                  maxLength: 13
+                  description: 來源端系統AP ID
+                TXNSEQ:
+                  type: string
+                  maxLength: 20
+                  description: 交易序號
+                file:
+                  type: string
+                  format: binary
+                  description: 上傳模板圖片
+                TemplateDescription:
+                  type: string
+                  maxLength: 200
+                  description: 模板描述
+                TemplateID:
+                  type: string
+                  maxLength: 32
+                  description: 模板ID
+              required:
+                - MSGID
+                - SOURCECHANNEL
+                - TXNSEQ
+                - file
+                - TemplateDescription
+                - TemplateID
+      responses:
+        "200":
+          description: 成功回應
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  MWHEADER:
+                    $ref: "#/components/schemas/MWHEADER"
+                  TRANRS:
+                    type: object
+                    properties:
+                      TemplateID:
+                        type: string
+                        maxLength: 32
+                        description: 模板ID
+                      Tags:
+                        type: object
+                        description: AI 依據自然語言決定的Tag清單（MAP 格式）
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
+                          description: 標籤字串陣列
+              example:
+                MWHEADER:
+                  MSGID: "程式名稱未定"
+                  SOURCECHANNEL: "AP_ID未定"
+                  RETURNCODE: "0000"
+                  RETURNDESC: "交易成功"
+                  TXNSEQ: ""
+                  O360SEQ: ""
+                TRANRS:
+                  TemplateID: "XXXXXXXXXXXXXXX..."
+                  Tags:
+                    group1: ["tag1", "tag2", "tag3"]
+        "400":
+          description: 必填欄位不完整
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  MWHEADER:
+                    $ref: "#/components/schemas/MWHEADER"
+              example:
+                MWHEADER:
+                  RETURNCODE: "E400"
+                  RETURNDESC: "必填欄位不完整"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  MWHEADER:
+                    $ref: "#/components/schemas/MWHEADER"
+              example:
+                MWHEADER:
+                  RETURNCODE: "E500"
+                  RETURNDESC: "Internal Server Error"
+        "504":
+          description: AI Gateway Time Out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  MWHEADER:
+                    $ref: "#/components/schemas/MWHEADER"
+              example:
+                MWHEADER:
+                  RETURNCODE: "E504"
+                  RETURNDESC: "AI Gateway Time Out"
+  /api-v1/common/template/insert:
+    post:
+      summary: 新增模板
+      description: 依據自然語言新增模板
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                MWHEADER:
+                  $ref: "#/components/schemas/MWHEADER"
+                TRANRQ:
+                  $ref: "#/components/schemas/TRANRQ"
+              required:
+                - MWHEADER
+                - TRANRQ
+            example:
+              MWHEADER:
+                MSGID: "程式名稱未定"
+                SOURCECHANNEL: "AP_ID未定"
+                TXNSEQ: ""
+                RETURNCODE: ""
+                RETURNDESC: ""
+                O360SEQ: ""
+              TRANRQ:
+                NL: "幫我推薦一個信用卡進度追蹤頁面模版"
+      responses:
+        "200":
+          description: 成功回應
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  MWHEADER:
+                    $ref: "#/components/schemas/MWHEADER"
+                  TRANRS:
+                    $ref: "#/components/schemas/TRANRS"
+              example:
+                MWHEADER:
+                  MSGID: "程式名稱未定"
+                  SOURCECHANNEL: "AP_ID未定"
+                  TXNSEQ: ""
+                  RETURNCODE: "0000"
+                  RETURNDESC: "交易成功"
+                  O360SEQ: ""
+                TRANRS:
+                  DebugMod: true
+                  tags: ["填寫", "選項", "送出", "資料新增", "銀行", "金融", "表單"]
+                  TemplateList:
+                    - TemplateID: "XXXXXXXXXXXXXXX..."
+                      Reliability: 0.85
+                      Tags:
+                        - 功能: ["填寫", "選項", "送出"]
+                        - 情境: ["資料新增", "資料修改/變更", "申請"]
+                        - 業務: ["銀行", "金融", "經辦"]
+                        - 佈局: ["表單"]
+                    - TemplateID: "XXXXXXXXXXXXXXX..."
+                      Reliability: 0.82
+                      Tags:
+                        - 功能: ["填寫", "登錄", "送出"]
+                        - 情境: ["資料新增", "資料修改/變更"]
+                        - 業務: ["銀行", "金融", "交易"]
+                        - 佈局: ["單頁"]
+                  Debug:
+                    userInput: "依據自然語言新增模板"
+                    aiSelectedTags: ["填寫", "選項", "送出", "資料新增", "銀行", "金融", "表單"]
+                    totalTagsAvailable: 150
+                    totalTemplatesChecked: 25
+        "400":
+          description: 必填欄位不完整
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  MWHEADER:
+                    $ref: "#/components/schemas/MWHEADER"
+              example:
+                MWHEADER:
+                  RETURNCODE: "E400"
+                  RETURNDESC: "必填欄位不完整"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  MWHEADER:
+                    $ref: "#/components/schemas/MWHEADER"
+              example:
+                MWHEADER:
+                  RETURNCODE: "E500"
+                  RETURNDESC: "Internal Server Error"
+        "504":
+          description: AI Gateway Time Out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  MWHEADER:
+                    $ref: "#/components/schemas/MWHEADER"
+              example:
+                MWHEADER:
+                  RETURNCODE: "E504"
+                  RETURNDESC: "AI Gateway Time Out"
+components:
+  schemas:
+    MWHEADER:
+      type: object
+      properties:
+        MSGID:
+          type: string
+          maxLength: 20
+          description: 程式名稱
+        SOURCECHANNEL:
+          type: string
+          maxLength: 13
+          description: 來源端系統AP ID
+        TXNSEQ:
+          type: string
+          maxLength: 20
+          description: 交易序號
+        RETURNCODE:
+          type: string
+          maxLength: 4
+          description: |
+            自訂業務錯誤代碼（非 HTTP 狀態碼）。
+            0000: 交易成功
+            E400: 必填欄位不完整
+            E500: Internal Server Error
+            E504: AI Gateway Time Out
+            9999: 其他系統異常
+        RETURNDESC:
+          type: string
+          maxLength: 128
+          description: 處理結果訊息
+        O360SEQ:
+          type: string
+          maxLength: 20
+          description: 保留欄位
+    TRANRQ:
+      type: object
+      properties:
+        NL:
+          type: string
+          maxLength: 200
+          description: 使用者輸入的自然語言
+      required:
+        - NL
+    TRANRS:
+      type: object
+      properties:
+        DebugMod:
+          type: boolean
+          description: 是否顯示詳細資訊
+        tags:
+          type: array
+          items:
+            type: string
+          description: AI 選出的相關標籤列表（只在除錯模式下顯示）
+        TemplateList:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            properties:
+              TemplateID:
+                type: string
+                maxLength: 32
+                description: 模板ID
+              Reliability:
+                type: number
+                format: float
+                description: AI 預估模板可信度
+              Tags:
+                type: array
+                items:
+                  type: object
+                  description: 各分類對應標籤物件
+                  properties:
+                    功能:
+                      type: array
+                      items:
+                        type: string
+                      description: 功能相關標籤
+                    情境:
+                      type: array
+                      items:
+                        type: string
+                      description: 情境相關標籤
+                    業務:
+                      type: array
+                      items:
+                        type: string
+                      description: 業務相關標籤
+                    佈局:
+                      type: array
+                      items:
+                        type: string
+                      description: 佈局相關標籤
+                description: 模板相關標籤分類陣列
+        Debug:
+          type: object
+          description: 除錯資訊（只在 DebugMod=true 時顯示）
+          properties:
+            userInput:
+              type: string
+              description: 使用者輸入的自然語言
+            aiSelectedTags:
+              type: array
+              items:
+                type: string
+              description: AI 選出的相關標籤
+            totalTagsAvailable:
+              type: integer
+              description: 資料庫中可用標籤總數
+            totalTemplatesChecked:
+              type: integer
+              description: 檢查的模板總數
