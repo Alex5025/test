@@ -10,6 +10,8 @@ import {
 import { DatabaseService } from './database.js';
 import { OpenAIService } from './llm.js';
 import { TemplateMatchingService } from './matching.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // 定義工具
 const QUERY_TEMPLATE_TOOL: Tool = {
@@ -56,6 +58,62 @@ const GET_TEMPLATE_BY_ID_TOOL: Tool = {
   }
 };
 
+const ANALYZE_TEMPLATE_IMAGE_TOOL: Tool = {
+  name: 'analyze_template_image',
+  description: '根據圖片和描述文字，從現有標籤中選出15個最相關的標籤並按功能、情境、業務、佈局分類',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      templateId: {
+        type: 'string',
+        description: '模板ID'
+      },
+      photo: {
+        type: 'string',
+        description: '圖片檔案路徑'
+      },
+      description: {
+        type: 'string',
+        description: '描述圖片內容的自然語言文字'
+      }
+    },
+    required: ['templateId', 'photo', 'description']
+  }
+};
+
+// 輔助函數：驗證圖片檔案
+function validateImageFile(imagePath: string): { isValid: boolean; error?: string } {
+  try {
+    // 檢查檔案是否存在
+    if (!fs.existsSync(imagePath)) {
+      return { isValid: false, error: '圖片檔案不存在' };
+    }
+
+    // 檢查是否為檔案（不是目錄）
+    const stats = fs.statSync(imagePath);
+    if (!stats.isFile()) {
+      return { isValid: false, error: '指定路徑不是檔案' };
+    }
+
+    // 檢查檔案格式
+    const ext = path.extname(imagePath).toLowerCase();
+    const supportedFormats = ['.png', '.jpg', '.jpeg'];
+    if (!supportedFormats.includes(ext)) {
+      return { isValid: false, error: `不支援的檔案格式。支援格式：${supportedFormats.join(', ')}` };
+    }
+
+    // 檢查檔案大小（限制為10MB）
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (stats.size > maxSize) {
+      return { isValid: false, error: '圖片檔案過大（限制10MB）' };
+    }
+
+    return { isValid: true };
+  } catch (error) {
+    return { isValid: false, error: `檔案驗證錯誤: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 // 初始化服務
 const dbService = new DatabaseService();
 const llmService = new OpenAIService();
@@ -77,7 +135,7 @@ const server = new Server(
 // 列出可用工具
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
-    tools: [QUERY_TEMPLATE_TOOL, GET_ALL_TAGS_TOOL, GET_TEMPLATE_BY_ID_TOOL],
+    tools: [QUERY_TEMPLATE_TOOL, GET_ALL_TAGS_TOOL, GET_TEMPLATE_BY_ID_TOOL, ANALYZE_TEMPLATE_IMAGE_TOOL],
   };
 });
 
@@ -191,6 +249,81 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           {
             type: 'text',
             text: JSON.stringify(template, null, 2)
+          }
+        ]
+      };
+    }
+
+    if (name === 'analyze_template_image') {
+      const { templateId, photo, description } = args as { 
+        templateId: string; 
+        photo: string; 
+        description: string 
+      };
+
+      // 驗證圖片檔案
+      const validation = validateImageFile(photo);
+      if (!validation.isValid) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                MWHEADER: {
+                  RETURNCODE: '9998',
+                  RETURNDESC: `圖片檔案錯誤: ${validation.error}`
+                }
+              }, null, 2)
+            }
+          ],
+          isError: true
+        };
+      }
+
+      console.error(`[MCP] 分析模板圖片 - TemplateID: ${templateId}`);
+      console.error(`[MCP] 圖片路徑: ${photo}`);
+      console.error(`[MCP] 描述: ${description}`);
+
+      // 獲取所有標籤資料
+      const allTags = await dbService.getAllTags();
+      const tagsByGroup = await dbService.getTagsByGroup();
+      console.error(`[MCP] 獲得 ${allTags.length} 個標籤`);
+
+      // 使用 LLM 服務分析圖片和描述
+      const categorizedTags = await llmService.analyzeTemplateImage(
+        photo, 
+        description, 
+        allTags, 
+        tagsByGroup
+      );
+
+      // 格式化回應
+      const response = {
+        TemplateID: templateId,
+        description: description,
+        Tags: [
+          {
+            功能: categorizedTags.功能
+          },
+          {
+            情境: categorizedTags.情境
+          },
+          {
+            業務: categorizedTags.業務
+          },
+          {
+            佈局: categorizedTags.佈局
+          }
+        ]
+      };
+
+      console.error(`[MCP] 分析完成 - 功能:${categorizedTags.功能.length}, 情境:${categorizedTags.情境.length}, 業務:${categorizedTags.業務.length}, 佈局:${categorizedTags.佈局.length}`);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(response, null, 2)
           }
         ]
       };

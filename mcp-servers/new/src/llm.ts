@@ -8,6 +8,21 @@ export interface LLMService {
    * @returns 嚴格返回 10 個最相關的 tags
    */
   selectRelevantTags(naturalLanguage: string, availableTags: string[], tagsByGroup?: Map<string, string[]>): Promise<string[]>;
+
+  /**
+   * 分析模板圖片和描述，從現有標籤中選出15個最相關的標籤並按分類整理
+   * @param imagePath 圖片檔案路徑
+   * @param description 描述圖片內容的自然語言文字
+   * @param availableTags 所有可用的 tags（從資料庫獲得）
+   * @param tagsByGroup 依群組分類的 tags
+   * @returns 按功能4個、情境4個、業務4個、佈局3個分類的標籤物件
+   */
+  analyzeTemplateImage(
+    imagePath: string, 
+    description: string, 
+    availableTags: string[], 
+    tagsByGroup: Map<string, string[]>
+  ): Promise<{功能: string[], 情境: string[], 業務: string[], 佈局: string[]}>;
 }
 
 export class OpenAIService implements LLMService {
@@ -19,6 +34,31 @@ export class OpenAIService implements LLMService {
     this.apiKey = process.env.OPENAI_API_KEY || '';
     this.model = process.env.OPENAI_MODEL || 'gpt-4';
     this.baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+  }
+
+  async analyzeTemplateImage(
+    imagePath: string, 
+    description: string, 
+    availableTags: string[], 
+    tagsByGroup: Map<string, string[]>
+  ): Promise<{功能: string[], 情境: string[], 業務: string[], 佈局: string[]}> {
+    console.error(`[MCP] 分析模板圖片: ${imagePath}`);
+    console.error(`[MCP] 描述: ${description}`);
+    
+    // 由於不使用 Vision API，我們主要依賴描述文字來分析
+    // 結合圖片檔名和描述來進行智能標籤選擇
+    const combinedInput = `${description} ${this.extractInfoFromImagePath(imagePath)}`;
+    console.error(`[MCP] 組合輸入: ${combinedInput}`);
+    
+    // 使用智能標籤選擇，但選擇15個標籤
+    const selectedTags = await this.intelligentTagSelectionForImage(combinedInput, availableTags, tagsByGroup);
+    console.error(`[MCP] 選出 ${selectedTags.length} 個標籤: ${selectedTags.join(', ')}`);
+    
+    // 按類別分配標籤：功能4個、情境4個、業務4個、佈局3個
+    const result = this.categorizeSelectedTags(selectedTags, tagsByGroup);
+    console.error(`[MCP] 分類結果: 功能${result.功能.length}個, 情境${result.情境.length}個, 業務${result.業務.length}個, 佈局${result.佈局.length}個`);
+    
+    return result;
   }
 
   async selectRelevantTags(naturalLanguage: string, availableTags: string[], tagsByGroup?: Map<string, string[]>): Promise<string[]> {
@@ -341,5 +381,290 @@ ${availableTags.join(', ')}
     }
 
     return rules;
+  }
+
+  /**
+   * 從圖片路徑中提取有用的資訊
+   */
+  private extractInfoFromImagePath(imagePath: string): string {
+    const fileName = imagePath.split('/').pop() || '';
+    const nameWithoutExt = fileName.replace(/\.(png|jpg|jpeg)$/i, '');
+    
+    // 移除常見的檔案命名模式，保留有意義的部分
+    const cleanName = nameWithoutExt
+      .replace(/截圖|screenshot|image|img/gi, '')
+      .replace(/\d{4}-\d{2}-\d{2}|上午|下午|\d{2}\.\d{2}\.\d{2}/g, '')
+      .replace(/[-_\s]+/g, ' ')
+      .trim();
+    
+    return cleanName;
+  }
+
+  /**
+   * 為圖片分析特化的智能標籤選擇（選15個標籤）
+   */
+  private async intelligentTagSelectionForImage(
+    combinedInput: string, 
+    availableTags: string[], 
+    tagsByGroup: Map<string, string[]>
+  ): Promise<string[]> {
+    const input = combinedInput.toLowerCase();
+    const selectedTags: Array<{ tag: string; score: number }> = [];
+
+    console.error(`[DEBUG] 圖片分析輸入: "${input}"`);
+    console.error(`[DEBUG] 可用標籤: ${availableTags.length}`);
+    
+    // 建立動態關鍵字映射
+    const semanticRules = this.buildSemanticRules(input, tagsByGroup);
+    console.error(`[DEBUG] 語義規則: ${semanticRules.size} 個類別匹配`);
+
+    // 為每個標籤計算相關性分數
+    for (const tag of availableTags) {
+      let score = 0;
+      const tagLower = tag.toLowerCase();
+
+      // 1. 直接完全匹配（最高分）
+      if (input.includes(tagLower) && tagLower.length > 0) {
+        score += 100;
+      }
+      
+      if (tagLower.includes(input) && input.length > 1) {
+        score += 80;
+      }
+
+      // 2. 分詞部分匹配
+      const inputWords = input.split(/[\s,，、]+/).filter(w => w.length > 0);
+      const inputChars: string[] = [];
+      for (const word of inputWords) {
+        inputChars.push(word);
+        for (let i = 0; i < word.length; i++) {
+          inputChars.push(word[i]);
+          if (i < word.length - 1) {
+            inputChars.push(word.substring(i, i + 2));
+          }
+        }
+      }
+      
+      const uniqueInputTokens = [...new Set(inputChars)].filter(t => t.length > 0);
+      
+      for (const token of uniqueInputTokens) {
+        if (token.length > 0) {
+          if (tagLower === token) {
+            score += 90;
+          } else if (tagLower.includes(token)) {
+            score += 50;
+          } else if (token.includes(tagLower) && tagLower.length > 1) {
+            score += 40;
+          } else if (tagLower.startsWith(token) || token.startsWith(tagLower)) {
+            score += 20;
+          }
+        }
+      }
+
+      // 3. 語義規則匹配
+      for (const [category, relatedTags] of semanticRules.entries()) {
+        if (relatedTags.includes(tag)) {
+          score += 40;
+        }
+      }
+
+      // 4. 類別相關性加分
+      for (const [category, tags] of tagsByGroup.entries()) {
+        if (tags.includes(tag)) {
+          const categoryLower = category.toLowerCase();
+          if (input.includes(categoryLower)) {
+            score += 30;
+          }
+        }
+      }
+
+      if (score > 0) {
+        selectedTags.push({ tag, score });
+      }
+    }
+    
+    console.error(`找到 ${selectedTags.length} 個有分數的標籤`);
+
+    // 按分數排序
+    selectedTags.sort((a, b) => b.score - a.score);
+    
+    // 確保選出15個標籤
+    if (selectedTags.length < 15) {
+      console.error(`[DEBUG] 只有 ${selectedTags.length} 個標籤，擴展至15個...`);
+      
+      // 從相關類別中補足標籤
+      const usedCategories = new Set<string>();
+      for (const st of selectedTags) {
+        for (const [category, tags] of tagsByGroup.entries()) {
+          if (tags.includes(st.tag)) {
+            usedCategories.add(category);
+          }
+        }
+      }
+      
+      // 從相同類別中補足
+      for (const category of usedCategories) {
+        if (selectedTags.length >= 15) break;
+        const categoryTags = tagsByGroup.get(category) || [];
+        for (const tag of categoryTags) {
+          if (!selectedTags.find(st => st.tag === tag)) {
+            selectedTags.push({ tag, score: 5 });
+            if (selectedTags.length >= 15) break;
+          }
+        }
+      }
+      
+      // 如果還不夠，從所有類別中補足
+      if (selectedTags.length < 15) {
+        for (const [category, tags] of tagsByGroup.entries()) {
+          if (selectedTags.length >= 15) break;
+          for (const tag of tags) {
+            if (!selectedTags.find(st => st.tag === tag)) {
+              selectedTags.push({ tag, score: 3 });
+              if (selectedTags.length >= 15) break;
+            }
+          }
+        }
+      }
+      
+      selectedTags.sort((a, b) => b.score - a.score);
+    }
+    
+    // 去重並取前15個
+    let uniqueTags = Array.from(new Set(selectedTags.map(item => item.tag)));
+    
+    // 確保有15個標籤
+    if (uniqueTags.length < 15) {
+      for (const tag of availableTags) {
+        if (!uniqueTags.includes(tag)) {
+          uniqueTags.push(tag);
+          if (uniqueTags.length >= 15) break;
+        }
+      }
+    }
+    
+    const topTags = uniqueTags.slice(0, 15);
+    
+    // 如果總標籤數不足15個，返回全部
+    if (topTags.length < 15 && availableTags.length < 15) {
+      return availableTags;
+    }
+
+    console.error(`[DEBUG] ✅ 選出 ${topTags.length} 個標籤`);
+    return topTags;
+  }
+
+  /**
+   * 將選出的15個標籤按類別分配：功能4個、情境4個、業務4個、佈局3個
+   */
+  private categorizeSelectedTags(
+    selectedTags: string[], 
+    tagsByGroup: Map<string, string[]>
+  ): {功能: string[], 情境: string[], 業務: string[], 佈局: string[]} {
+    const result = {
+      功能: [] as string[],
+      情境: [] as string[],
+      業務: [] as string[],
+      佈局: [] as string[]
+    };
+
+    // 先按類別分組標籤
+    const tagsByCategory = {
+      功能: [] as string[],
+      情境: [] as string[],
+      業務: [] as string[],
+      佈局: [] as string[]
+    };
+
+    // 將選出的標籤按類別分組
+    for (const tag of selectedTags) {
+      let assigned = false;
+      for (const [groupName, groupTags] of tagsByGroup.entries()) {
+        if (groupTags.includes(tag)) {
+          const categoryKey = this.mapGroupToCategory(groupName);
+          if (categoryKey && tagsByCategory[categoryKey]) {
+            tagsByCategory[categoryKey].push(tag);
+            assigned = true;
+            break;
+          }
+        }
+      }
+      
+      // 如果沒有找到對應類別，嘗試根據標籤內容判斷
+      if (!assigned) {
+        const category = this.inferCategoryFromTag(tag);
+        if (tagsByCategory[category]) {
+          tagsByCategory[category].push(tag);
+        }
+      }
+    }
+
+    // 按指定數量分配：功能4個、情境4個、業務4個、佈局3個
+    result.功能 = tagsByCategory.功能.slice(0, 4);
+    result.情境 = tagsByCategory.情境.slice(0, 4);
+    result.業務 = tagsByCategory.業務.slice(0, 4);
+    result.佈局 = tagsByCategory.佈局.slice(0, 3);
+
+    // 如果某類別不足，從其他類別補足
+    const targetCounts = { 功能: 4, 情境: 4, 業務: 4, 佈局: 3 };
+    const remainingTags = [...selectedTags];
+    
+    for (const [category, targetCount] of Object.entries(targetCounts)) {
+      const key = category as keyof typeof result;
+      while (result[key].length < targetCount && remainingTags.length > 0) {
+        const tag = remainingTags.find(t => !Object.values(result).flat().includes(t));
+        if (tag) {
+          result[key].push(tag);
+          const index = remainingTags.indexOf(tag);
+          if (index > -1) remainingTags.splice(index, 1);
+        } else {
+          break;
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * 將資料庫的群組名稱映射到四個標準類別
+   */
+  private mapGroupToCategory(groupName: string): '功能' | '情境' | '業務' | '佈局' | null {
+    const name = groupName.toLowerCase();
+    if (name.includes('功能') || name.includes('function')) return '功能';
+    if (name.includes('情境') || name.includes('situation')) return '情境';
+    if (name.includes('業務') || name.includes('business')) return '業務';
+    if (name.includes('佈局') || name.includes('layout')) return '佈局';
+    return null;
+  }
+
+  /**
+   * 根據標籤內容推斷類別
+   */
+  private inferCategoryFromTag(tag: string): '功能' | '情境' | '業務' | '佈局' {
+    const tagLower = tag.toLowerCase();
+    
+    // 功能相關關鍵字
+    if (/填寫|上傳|下載|搜尋|查詢|篩選|操作|送出|確認|取消|編輯|刪除|新增|匯出|列印/.test(tagLower)) {
+      return '功能';
+    }
+    
+    // 情境相關關鍵字
+    if (/申請|審核|處理|流程|案件|追蹤|監控|管理|檢視|核決/.test(tagLower)) {
+      return '情境';
+    }
+    
+    // 業務相關關鍵字
+    if (/銀行|金融|客戶|信貸|房貸|開戶|理財|投資|保險|風險|合規/.test(tagLower)) {
+      return '業務';
+    }
+    
+    // 佈局相關關鍵字
+    if (/表單|列表|卡片|彈窗|頁面|按鈕|欄位|版面|介面/.test(tagLower)) {
+      return '佈局';
+    }
+    
+    // 預設為功能
+    return '功能';
   }
 }
